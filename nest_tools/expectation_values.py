@@ -88,7 +88,6 @@ def get_site(path, walker, ns_steps=4000, Temp=[300], supercell=4):
         E.append(at.info["NS_energy"])
 
     vectors = np.array(vectors)
-    print(vectors)
     w = np.log(w)
     E = np.array(E)
     E -= np.min(E)
