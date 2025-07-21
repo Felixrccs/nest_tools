@@ -69,7 +69,7 @@ def get_site(path, walker, ns_steps=4000, Temp=[300], supercell=4):
     :type Temp: array, optional
     """
     Temp = np.array(Temp)
-    atoms = read(path, ":4000")
+    atoms = read(path, ":")
     K = walker / (walker + 1)
 
     vectors = []
