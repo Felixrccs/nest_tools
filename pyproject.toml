@@ -11,3 +11,8 @@
 
 [tool.setuptools.dynamic]
     version = {attr  = "nest_tools.__version__"}
+
+[build-system]
+    requires = ["setuptools", "wheel"]
+    build-backend = "setuptools.build_meta"
+
