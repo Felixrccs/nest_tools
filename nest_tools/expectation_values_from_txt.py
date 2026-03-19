@@ -5,7 +5,7 @@ import numpy as np
 from scipy.constants import constants
 from sage_lib.partition.Partition import Partition
 
-from ase.io import iread
+from ase.io import iread, read
 
 from .utils import *
 
@@ -49,7 +49,8 @@ def subselect(data_folder, Temp = None):
     xyz_file = os.path.join(data_folder, 'Test.traj.extxyz')
                             
     if type(Temp) not in [list,np.array]:
-        Temp = np.arange(start=100,stop=2100,step=10)
+        Temp = np.concat([np.arange(start=100,stop=3100,step=15), np.arange(start=3100,stop=4100,step=50)])
+        print(Temp)
     
     with open(data_file, 'r') as file:
         first_line = file.readline().strip()
@@ -81,7 +82,7 @@ def subselect(data_folder, Temp = None):
 
     new_ats = []
     for val in tqdm(new_ids):
-        new_ats.append(*iread(xyz_file,val))
+        new_ats.append(read(xyz_file,val))
     return new_ats
 
 
