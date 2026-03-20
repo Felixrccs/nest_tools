@@ -1,64 +1,29 @@
-
-from ase.neighborlist import neighbor_list
-from vesin import NeighborList as vesin_nl
 import numpy as np
 import networkx as nx
 import math, pynauty, hashlib
 from ase import Atoms
 from typing import Optional, Callable
-
 from tqdm import tqdm
+from vesin import NeighborList as vesin_nl
+from sage_lib.partition.Partition import Partition
 
 
 
 
+def get_atoms(partition: Partition) -> list[Atoms]:
+    """
+    Extract ASE Atoms objects from each entry in a partition.
 
-def get_connectivity(atoms):
+    Parameters
+    ----------
+    partition : Partition
+        Collection of structure entries.
 
-    def compute_graph(at):
-        ids = [i.index for i in at if i.position[2]<5.1]
-        for i in sorted(ids,reverse=True):
-            del at[i]
-        G = nx.Graph()
-        G.add_nodes_from(range(len(at)))
-        
-        edges = np.stack(neighbor_list('ij',at, 3.0))
-        unique_edges = np.unique(np.sort(edges.T,axis=1),axis=0)
-        G.add_edges_from(unique_edges)
-        degree = G.degree
-        node_type = np.zeros(len(G))
-        for i in G:
-            node_type[i]=degree[i]
-        return node_type
-    
-    data = []
-    for at in atoms:
-        data.append(compute_graph(at)) 
-
-    env = np.zeros((len(data),int(np.max(np.unique(data))+1)))
-
-    for i,val in enumerate(data):
-        key, count = np.unique(val, return_counts=True)
-        for j, k in enumerate(key):
-            env[i,int(k)] = count[j]
-
-    return env
-
-
-def get_rdf_ase(atoms):
-    data = []
-    for at in atoms:
-        ids = [i.index for i in at if i.position[2]<5.1]
-        for i in sorted(ids,reverse=True):
-            del at[i]
-        data.append(neighbor_list('d',at, 5.0))
-    
-    return(data)
-
-
-
-def get_atoms(partition):
-
+    Returns
+    -------
+    list[Atoms]
+        ASE Atoms objects with atomic numbers, positions, and cell.
+    """
     data = []
     for p in tqdm(partition):
         data.append(Atoms(numbers=p.atoms.get_atomic_numbers(),positions=p.atoms.positions, cell = p.atoms.cell))
@@ -68,7 +33,22 @@ def get_atoms(partition):
 
 
 
-def get_rdf(partition):
+def get_rdf(partition: Partition) -> list[np.ndarray]:
+    """
+    Compute pairwise distances for Cu atoms (Z=29) above z=5.1 Å.
+
+    Uses a neighbor list with a 5.0 Å cutoff under periodic boundary conditions.
+
+    Parameters
+    ----------
+    partition : Partition
+        Collection of structure entries.
+
+    Returns
+    -------
+    list[np.ndarray]
+        Pairwise distances for each entry in the partition.
+    """
     nl_fn = vesin_nl(float(5.0), full_list=True, sorted=False)
 
     data = []
@@ -85,7 +65,22 @@ def get_rdf(partition):
     return(data)
 
 
-def get_rdf_full(partition):
+def get_rdf_full(partition: Partition) -> list[np.ndarray]:
+    """
+    Compute pairwise distances for all atoms in each structure.
+
+    Uses a neighbor list with a 10.0 Å cutoff under periodic boundary conditions.
+
+    Parameters
+    ----------
+    partition : Partition
+        Collection of structure entries.
+
+    Returns
+    -------
+    list[np.ndarray]
+        Pairwise distances for each entry in the partition.
+    """
     nl_fn = vesin_nl(float(10.0), full_list=True, sorted=False)
 
     data = []
@@ -104,9 +99,24 @@ def get_rdf_full(partition):
 
 
 
-def get_graph(partition):
-    # nl_fn = vesin_nl(float(3.0), full_list=True, sorted=False) # Cu
-    nl_fn = vesin_nl(float(2.3), full_list=True, sorted=False) # CuO
+def get_graph(partition: Partition) -> list[nx.Graph]:
+    """
+    Build undirected neighbor graphs for atoms above z=5.1 Å (Cu surface layer).
+
+    Uses a 3.0 Å cutoff neighbor list. Edges are deduplicated so each bond
+    appears once.
+
+    Parameters
+    ----------
+    partition : Partition
+        Collection of structure entries.
+
+    Returns
+    -------
+    list[nx.Graph]
+        Undirected graphs, one per entry in the partition.
+    """
+    nl_fn = vesin_nl(float(3.0), full_list=True, sorted=False) # Cu
 
     def compute_graph(p):
         positions = np.array([i for i in p.AtomPositionManager.positions if i[2]>5.1])
@@ -131,7 +141,23 @@ def get_graph(partition):
     return data
 
 
-def get_graph_CuO(partition):
+def get_graph_CuO(partition: Partition) -> list[nx.Graph]:
+    """
+    Build heteroatomic neighbor graphs for atoms above z=5.1 Å (CuO surface layer).
+
+    Uses a 2.5 Å cutoff neighbor list. Only edges between atoms of different
+    species (e.g. Cu-O bonds) are retained.
+
+    Parameters
+    ----------
+    partition : Partition
+        Collection of structure entries.
+
+    Returns
+    -------
+    list[nx.Graph]
+        Undirected graphs with only heteroatomic edges, one per entry.
+    """
     nl_fn = vesin_nl(float(2.5), full_list=False, sorted=False) # CuO
     
 
@@ -162,7 +188,22 @@ def get_graph_CuO(partition):
 
 
 
-def get_graph_count(partition):
+def get_graph_count(partition: Partition) -> list[int]:
+    """
+    Count connected components in the neighbor graph for atoms above z=5.1 Å.
+
+    Uses a 2.3 Å cutoff neighbor list (suitable for CuO bond lengths).
+
+    Parameters
+    ----------
+    partition : Partition
+        Collection of structure entries.
+
+    Returns
+    -------
+    list[int]
+        Number of connected components per entry in the partition.
+    """
     nl_fn = vesin_nl(float(2.3), full_list=True, sorted=False) # 2.3 for CuO
 
     def compute_graph(p):
@@ -228,6 +269,31 @@ def _is_nonperiodic(apm) -> bool:
         return not np.isfinite(lat).all() or abs(np.linalg.det(lat)) < 1e-9
     except Exception:
         return True
+
+
+
+def canonical_hash(G: nx.Graph) -> str:
+    """
+    Exact isomorphism-invariant hash via nauty canonical labeling.
+    Zero false positives — two graphs get the same hash IFF they are isomorphic.
+    """
+    nodes = sorted(G.nodes())
+    idx   = {v: i for i, v in enumerate(nodes)}
+    n     = len(nodes)
+
+    adjacency = {
+        idx[u]: {idx[v] for v in G.neighbors(u)}
+        for u in G.nodes()
+    }
+
+    g = pynauty.Graph(
+        number_of_vertices=n,
+        directed=G.is_directed(),
+        adjacency_dict=adjacency,
+    )
+    cert = pynauty.certificate(g)   # canonical certificate bytes
+    return hashlib.sha256(cert).hexdigest()
+
 
 
 def _structure_factor_factory(
@@ -376,7 +442,25 @@ def _structure_factor_factory(
     return sf_calc
 
 
-def get_sf(partition):
+def get_sf(partition: Partition) -> np.ndarray:
+    """
+    Compute structure factor descriptors for each entry in a partition.
+
+    Evaluates structure factors along the [100] and [010] directions for
+    integer mode indices 1–5, then averages the two contributions.
+
+    Parameters
+    ----------
+    partition : Partition
+        Collection of structure entries.
+
+    Returns
+    -------
+    np.ndarray
+        Array of shape ``(len(partition), 3, C, M)`` containing the averaged
+        real part, imaginary part, and modulus of the structure factors,
+        where C is the number of species channels and M the number of modes.
+    """
     sf = _structure_factor_factory(modes = (np.array([1,0,0])[:,None]*np.linspace(1,5,5)).T)
     sf_2 = _structure_factor_factory(modes = (np.array([0,1,0])[:,None]*np.linspace(1,5,5)).T)
 
@@ -386,29 +470,6 @@ def get_sf(partition):
 
     return np.array(data)
 
-
-
-def canonical_hash(G: nx.Graph) -> str:
-    """
-    Exact isomorphism-invariant hash via nauty canonical labeling.
-    Zero false positives — two graphs get the same hash IFF they are isomorphic.
-    """
-    nodes = sorted(G.nodes())
-    idx   = {v: i for i, v in enumerate(nodes)}
-    n     = len(nodes)
-
-    adjacency = {
-        idx[u]: {idx[v] for v in G.neighbors(u)}
-        for u in G.nodes()
-    }
-
-    g = pynauty.Graph(
-        number_of_vertices=n,
-        directed=G.is_directed(),
-        adjacency_dict=adjacency,
-    )
-    cert = pynauty.certificate(g)   # canonical certificate bytes
-    return hashlib.sha256(cert).hexdigest()
 
     
 
