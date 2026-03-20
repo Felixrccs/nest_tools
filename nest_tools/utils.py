@@ -132,7 +132,6 @@ def get_graph(partition):
 
 
 def get_graph_CuO(partition):
-    # nl_fn = vesin_nl(float(3.0), full_list=True, sorted=False) # Cu
     nl_fn = vesin_nl(float(2.5), full_list=False, sorted=False) # CuO
     
 
