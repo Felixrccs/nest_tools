@@ -3,7 +3,7 @@ from ase.neighborlist import neighbor_list
 from vesin import NeighborList as vesin_nl
 import numpy as np
 import networkx as nx
-import math
+import math, pynauty, hashlib
 from ase import Atoms
 from typing import Optional, Callable
 
@@ -386,6 +386,30 @@ def get_sf(partition):
         data.append(np.mean([sf(p), sf_2(p)],axis=0))
 
     return np.array(data)
+
+
+
+def canonical_hash(G: nx.Graph) -> str:
+    """
+    Exact isomorphism-invariant hash via nauty canonical labeling.
+    Zero false positives — two graphs get the same hash IFF they are isomorphic.
+    """
+    nodes = sorted(G.nodes())
+    idx   = {v: i for i, v in enumerate(nodes)}
+    n     = len(nodes)
+
+    adjacency = {
+        idx[u]: {idx[v] for v in G.neighbors(u)}
+        for u in G.nodes()
+    }
+
+    g = pynauty.Graph(
+        number_of_vertices=n,
+        directed=G.is_directed(),
+        adjacency_dict=adjacency,
+    )
+    cert = pynauty.certificate(g)   # canonical certificate bytes
+    return hashlib.sha256(cert).hexdigest()
 
     
 
