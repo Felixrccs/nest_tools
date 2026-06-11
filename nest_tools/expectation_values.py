@@ -6,146 +6,19 @@ from typing import Optional
 
 import numpy as np
 from numpy.typing import ArrayLike
-
-from scipy.constants import constants
 from sage_lib.partition.Partition import Partition
+from scipy import constants
 
-from ase.io import iread, read
+from .utils import get_atoms, get_dist, get_graph_CuO, get_sf, get_z
 
-from .utils import *
-
-
-def get_xyz(data_folder: str, Temp: Optional[ArrayLike] = None) -> list:
-    """Return the most probable atomic structure at each temperature from a nested sampling run.
-
-    For each temperature in ``Temp``, the Boltzmann probability of every
-    sample is computed from the NS iteration indices and energies stored in
-    ``Test.NS_samples``.  The sample with the highest probability is then
-    looked up in the corresponding ``Test.traj.extxyz`` trajectory file and
-    returned together with its temperature.
-
-    Parameters
-    ----------
-    data_folder : str
-        Path to the directory that contains ``Test.NS_samples`` and
-        ``Test.traj.extxyz``.
-    Temp : array-like, optional
-        Temperatures (in K) at which to evaluate the probability.
-
-    Returns
-    -------
-    list of [ase.io.iread generator, float]
-        Each element is a two-item list ``[atoms_generator, T]`` where
-        *atoms_generator* is the lazy ASE reader for the most-probable
-        structure at temperature *T*.
-    """
-    data_file = os.path.join(data_folder, 'Test.NS_samples')
-    xyz_file = os.path.join(data_folder, 'Test.traj.extxyz')
-                            
-    #if np.anTemp == None:
-    #    Temp = np.arange(start=100,stop=2500,step=50)
-    
-    with open(data_file, 'r') as file:
-        first_line = file.readline().strip()
-        params = json.loads(first_line[2:])
-
-    data = np.loadtxt(data_file,skiprows=1).T
-
-    K = params["n_walkers"]/(params[ "n_walkers"]+1)
-
-    E = data[1]
-    w = np.log(K ** (data[0] + 1) - K ** (data[0] + 2))
-    E -= np.min(E)
-    w_mat = np.broadcast_to(w[:, None], (len(E), len(Temp)))
-    E_mat = np.broadcast_to(E[:, None], (len(E), len(Temp)))
-    T_mat = np.broadcast_to(Temp[:, None], (len(Temp), len(E))).T
-    log_p = w_mat - E_mat / (constants.k / constants.e * T_mat)
-    log_p -= np.broadcast_to(np.max(log_p, axis=0)[:, None], (len(Temp), len(E))).T
-
-    P = np.exp(log_p)
-    P /= np.broadcast_to(np.sum(P, axis=0)[:, None], (len(Temp), len(E))).T
-    #P = P.T[0]
-    ids = np.argmax(P,axis=0)
-    new_ats = []
-    for i, val in enumerate(ids):
-        new_ats.append([iread(xyz_file,val),Temp[i]])
-    return new_ats
+# In-plane edge length (Å) of the 4×4 Cu surface cell used for the 2D density.
+CELL_LENGTH = 14.52557132
 
 
-def subselect(data_folder: str, Temp: Optional[ArrayLike] = None) -> list:
-    """Select one representative atomic structure per temperature, avoiding duplicates.
-
-    The Boltzmann probability of each NS sample is computed for every
-    temperature in ``Temp``.  For each temperature the samples are ranked by
-    probability and the highest-ranked structure that has not already been
-    selected for a previous temperature is appended to the result list.  This
-    ensures that the returned structures span configuration space rather than
-    repeatedly returning the same dominant sample.
-
-    Parameters
-    ----------
-    data_folder : str
-        Path to the directory containing ``Test.NS_samples`` and
-        ``Test.traj.extxyz``.
-    Temp : list or numpy.ndarray, optional
-        Temperatures (in K) to consider.  If *None* or not a list/array, a
-        default grid spanning 100–4100 K is used.
-
-    Returns
-    -------
-    list of ase.Atoms
-        One ``Atoms`` object per temperature in ``Temp``, chosen to maximise
-        coverage of distinct configurations.
-    """
-    data_file = os.path.join(data_folder, 'Test.NS_samples')
-    xyz_file = os.path.join(data_folder, 'Test.traj.extxyz')
-                            
-    if type(Temp) not in [list,np.array]:
-        Temp = np.concat([np.arange(start=100,stop=3100,step=15), np.arange(start=3100,stop=4100,step=50)])
-        print(Temp)
-    
-    with open(data_file, 'r') as file:
-        first_line = file.readline().strip()
-        params = json.loads(first_line[2:])
-
-    data = np.loadtxt(data_file,skiprows=1).T
-
-    K = params["n_walkers"]/(params[ "n_walkers"]+1)
-
-    E = data[1]
-    w = np.log(K ** (data[0] + 1) - K ** (data[0] + 2))
-    E -= np.min(E)
-    w_mat = np.broadcast_to(w[:, None], (len(E), len(Temp)))
-    E_mat = np.broadcast_to(E[:, None], (len(E), len(Temp)))
-    T_mat = np.broadcast_to(Temp[:, None], (len(Temp), len(E))).T
-    log_p = w_mat - E_mat / (constants.k / constants.e * T_mat)
-    log_p -= np.broadcast_to(np.max(log_p, axis=0)[:, None], (len(Temp), len(E))).T
-
-    P = np.exp(log_p)
-    P /= np.broadcast_to(np.sum(P, axis=0)[:, None], (len(Temp), len(E))).T
-    #P = P.T[0]
-    new_ids = []
-    for val in P.T:
-        ids = np.argsort(val)[::-1]
-        count = 0
-        while ids[count] in new_ids:
-            count+=1
-        new_ids.append(ids[count])
-
-    new_ats = []
-    for val in tqdm(new_ids):
-        new_ats.append(read(xyz_file,val))
-    return new_ats
-
-
-
-
-
-
-def get_probabiliy(
+def get_probability(
     data_folder: str,
     Temp: Optional[ArrayLike] = None,
-    iter: int = 1,
+    stride: int = 1,
     observable: Optional[str] = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Compute Boltzmann weights and a thermodynamic observable from NS output files.
@@ -164,19 +37,20 @@ def get_probabiliy(
     Temp : array-like, optional
         Temperatures (in K) at which to evaluate the probability.  Defaults
         to ``np.arange(100, 2500, 50)`` if not provided.
-    iter : int, optional
-        Stride for sub-sampling the NS samples (every *iter*-th row is used).
-        Default is 1 (no sub-sampling).
-    observable : {None, 'rdf', 'rdf_full', 'sf', 'subG', 'graph', 'atoms'}
+    stride : int, optional
+        Stride for sub-sampling the NS samples (every *stride*-th row is
+        used). Default is 1 (no sub-sampling).
+    observable : {None, 'z', 'dist', 'sf', 'graph', 'atoms', 'energy'}
         Which observable to compute:
 
-        * ``None``      – raw energies from the samples file.
-        * ``'rdf'``     – radial distribution function (partial).
-        * ``'rdf_full'``– full radial distribution function.
-        * ``'sf'``      – structure factor.
-        * ``'subG'``    – subgraph / motif count.
-        * ``'graph'``   – CuO graph descriptor.
-        * ``'atoms'``   – per-atom properties.
+        * ``None``       – the partition itself (a list of containers if
+          *stride* > 1).
+        * ``'z'``        – mean and maximum z-position of the surface layer.
+        * ``'dist'``     – Cu–Cu pair distances of the surface layer.
+        * ``'sf'``       – structure factor descriptor.
+        * ``'graph'``    – heteroatomic CuO neighbor graphs.
+        * ``'atoms'``    – ASE ``Atoms`` objects.
+        * ``'energy'``   – raw energies from the samples file.
 
     Returns
     -------
@@ -184,43 +58,49 @@ def get_probabiliy(
         Temperature grid used for the calculation.
     P : numpy.ndarray, shape (n_samples, n_temps)
         Normalised Boltzmann probability of each sample at each temperature.
-    n_observable : numpy.ndarray
-        The evaluated observable array corresponding to *Temp*.
+    n_observable : numpy.ndarray or list
+        The evaluated observable, one entry per (sub-sampled) NS sample.
+
+    Raises
+    ------
+    ValueError
+        If *observable* is not one of the recognised options.
     """
-    data_file = os.path.join(data_folder, 'Test.NS_samples')
-    db_file = os.path.join(data_folder, 'db')
+    data_file = os.path.join(data_folder, "Test.NS_samples")
+    db_file = os.path.join(data_folder, "db")
 
     p = Partition(
         storage="hybrid",
         local_root=db_file,
-        access="ro",    # "ro" = read-only, "rw" = read/write
+        access="ro",  # "ro" = read-only, "rw" = read/write
     )
-    
-    if type(Temp) not in [list,np.array]:
-        Temp = np.arange(start=100,stop=2500,step=50)
 
-    def _get_P_from_txt(data_file: str, iter: int) -> np.ndarray:
+    if Temp is None:
+        Temp = np.arange(start=100, stop=2500, step=50)
+    Temp = np.asarray(Temp)
+
+    def _get_P_from_txt(data_file: str, stride: int) -> np.ndarray:
         """Read ``data_file`` and return the Boltzmann probability matrix.
 
         Parameters
         ----------
         data_file : str
             Path to the ``Test.NS_samples`` file.
-        iter : int
-            Row stride for sub-sampling (every *iter*-th sample is kept).
+        stride : int
+            Row stride for sub-sampling (every *stride*-th sample is kept).
 
         Returns
         -------
         numpy.ndarray, shape (n_samples, n_temps)
             Normalised Boltzmann probabilities.
         """
-        with open(data_file, 'r') as file:
+        with open(data_file, "r") as file:
             first_line = file.readline().strip()
             params = json.loads(first_line[2:])
 
-        data = np.loadtxt(data_file,skiprows=1)[::iter].T
+        data = np.loadtxt(data_file, skiprows=1)[::stride].T
 
-        K = params["n_walkers"]/(params[ "n_walkers"]+1)
+        K = params["n_walkers"] / (params["n_walkers"] + 1)
 
         E = data[1]
         w = np.log(K ** (data[0] + 1) - K ** (data[0] + 2))
@@ -234,32 +114,96 @@ def get_probabiliy(
         P = np.exp(log_p)
         P /= np.broadcast_to(np.sum(P, axis=0)[:, None], (len(Temp), len(E))).T
         return P
-    if iter >1:
-        p = p[::iter]
-    
-    P = _get_P_from_txt(data_file=data_file,iter=iter)
-    if observable == 'rdf':
-        n_observable = get_rdf(p)
-    if observable == 'rdf_full':
-        n_observable = get_rdf_full(p)
-    if observable == 'sf':
+
+    if stride > 1:
+        p = p[::stride]
+
+    P = _get_P_from_txt(data_file=data_file, stride=stride)
+    if observable is None:
+        n_observable = p
+    elif observable == "z":
+        n_observable = get_z(p)
+    elif observable == "dist":
+        n_observable = get_dist(p)
+    elif observable == "sf":
         n_observable = get_sf(p)
-    if observable == 'subG':
-        n_observable = get_graph_count(p)
-    if observable == 'graph':
+    elif observable == "graph":
         n_observable = get_graph_CuO(p)
-    if observable == 'atoms':
+    elif observable == "atoms":
         n_observable = get_atoms(p)
-    if observable == None:
-        n_observable = np.loadtxt(data_file,skiprows=1)[::iter].T[1]
+    elif observable == "energy":
+        n_observable = np.loadtxt(data_file, skiprows=1)[::stride].T[1]
+    else:
+        raise ValueError(f"Unknown observable: {observable!r}")
     return Temp, P, n_observable
 
 
-  
+# Backward-compatible alias for the original (misspelled) name.
+get_probabiliy = get_probability
 
 
+def calculate_rdf(
+    path: str, stride: int = 1, n_atoms: int = 24
+) -> tuple[np.ndarray, np.ndarray, list[np.ndarray]]:
+    """
+    Compute the temperature-dependent 2D radial distribution function g(r).
 
+    Pair distances are collected for every nested-sampling configuration
+    (observable ``'dist'``) and histogrammed with Boltzmann probability
+    weights, yielding one RDF per temperature on a grid from 2450 K down to
+    100 K in steps of 50 K.
 
+    The normalisation is two-dimensional: counts are divided by the annulus
+    area ``π (r₂² − r₁²)`` of each bin and by the ideal 2D density
+    ``n_atoms / CELL_LENGTH²``. Distances are binned between 1.5 and 4.5 Å
+    (199 bins).
 
+    Parameters
+    ----------
+    path : str
+        Path to the nested-sampling run folder (containing
+        ``Test.NS_samples`` and the ``db`` sub-directory).
+    stride : int
+        Stride for sub-sampling the NS samples (every *stride*-th row is
+        used).
+    n_atoms : int
+        Number of atoms contributing to the pair distances; sets the ideal
+        2D density and the per-atom probability weighting.
 
+    Returns
+    -------
+    T : numpy.ndarray
+        Temperature grid (K), descending from 2450 to 100.
+    bin_centers : numpy.ndarray
+        Histogram bin centers (Å), shape ``(199,)``.
+    all_rdf : list[numpy.ndarray]
+        One 2D RDF per temperature, each of shape ``(199,)``.
+    """
+    T, P, data = get_probability(
+        path,
+        stride=stride,
+        observable="dist",
+        Temp=np.arange(start=2450, stop=99, step=-50),
+    )
 
+    d_stack = np.concatenate(data)
+    length = np.array([len(val) for val in data])
+
+    _bins = np.linspace(1.5, 4.5, 200)
+    bin_centers = 0.5 * (_bins[:-1] + _bins[1:])
+    _shell_area = np.pi * (
+        np.power(_bins[1:], 2) - np.power(_bins[:-1], 2)
+    )  # 2D normalisation
+    _ideal_density = n_atoms / (CELL_LENGTH * CELL_LENGTH)  # 2D density
+    _normalisation = _shell_area * _ideal_density
+
+    all_rdf = []
+    for probs in P.T:
+        P_adjusted = np.repeat(probs / n_atoms, length)
+        counts, _ = np.histogram(
+            d_stack, bins=_bins, density=False, weights=P_adjusted
+        )
+        rdf = counts / _normalisation
+        all_rdf.append(rdf)
+
+    return T, bin_centers, all_rdf
